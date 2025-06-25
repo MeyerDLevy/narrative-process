@@ -34,6 +34,7 @@ def run_pipeline(input_df, working_dir=None, temp_dir=None, verbose=False, save_
         term_embed_mat_path = os.path.join(working_dir, "term_embeds_mat.pickle")
         verb_mm_path = os.path.join(working_dir, "verb_cosine_similarity.mmap")
         verb_embed_mat_path = os.path.join(working_dir, "verb_embeds_mat.pickle")
+        verb_splitdf_path = os.path.join(working_dir, "verb_splitdf.pickle")
         grouped_data_path = os.path.join(working_dir, "grouped_data.pickle")
         rels_mmfile_path = os.path.join(working_dir, "rels_cosine_similarity.mmap")
 
@@ -136,6 +137,7 @@ def run_pipeline(input_df, working_dir=None, temp_dir=None, verbose=False, save_
         verb_data = [(key, text) for key, texts in verb_clusters_named.items() for text in texts]
         verb_splitdf = pd.DataFrame(verb_data, columns=['key', 'verb'])
         verb_splitdf = pd.merge(verb_splitdf, verb_cluster_central, how="left", on="key")
+        save_pickle(verb_splitdf, verb_splitdf_path)
         verb2rollup = pd.Series(verb_splitdf['mostcentralterm'].values, index=verb_splitdf['verb']).to_dict()
         log(f"Created verb2rollup mapping for {len(verb2rollup)} verbs")
 
