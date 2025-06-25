@@ -50,16 +50,15 @@ def process(value, df, edf):
         return np.mean(filtered_embeddings, axis=0)
     return np.nan
 
-def process_batch(values, df, edf):
+def process_batch(values, df, edf, columns=("arg0", "arg1")):
+    """Average embeddings for unique values across specified columns."""
     batch_result = {}
     for value in values:
-        indices_arg0 = df[df['arg0'] == value].index
-        indices_arg1 = df[df['arg1'] == value].index
-        embeddings_arg0 = edf["arg0"].iloc[indices_arg0].tolist()
-        embeddings_arg1 = edf["arg1"].iloc[indices_arg1].tolist()
-        all_embeddings = embeddings_arg0 + embeddings_arg1
-        filtered_embeddings = [e for e in all_embeddings if not np.isnan(e).any()]
-        if filtered_embeddings:
-            averaged_embedding = np.mean(filtered_embeddings, axis=0)
-            batch_result[value] = averaged_embedding
+        embeddings = []
+        for col in columns:
+            indices = df[df[col] == value].index
+            embeddings.extend(edf[col].iloc[indices].tolist())
+        filtered = [e for e in embeddings if isinstance(e, np.ndarray) and not np.isnan(e).any()]
+        if filtered:
+            batch_result[value] = np.mean(filtered, axis=0)
     return batch_result
