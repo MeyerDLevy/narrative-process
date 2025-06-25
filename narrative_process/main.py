@@ -32,6 +32,8 @@ def run_pipeline(input_df, working_dir=None, temp_dir=None, verbose=False, save_
         names_path = os.path.join(working_dir, "names.pickle")
         mm_path = os.path.join(working_dir, "cosine_similarity.mmap")
         term_embed_mat_path = os.path.join(working_dir, "term_embeds_mat.pickle")
+        verb_mm_path = os.path.join(working_dir, "verb_cosine_similarity.mmap")
+        verb_embed_mat_path = os.path.join(working_dir, "verb_embeds_mat.pickle")
         grouped_data_path = os.path.join(working_dir, "grouped_data.pickle")
         rels_mmfile_path = os.path.join(working_dir, "rels_cosine_similarity.mmap")
 
@@ -106,11 +108,43 @@ def run_pipeline(input_df, working_dir=None, temp_dir=None, verbose=False, save_
         arg2rollup = pd.Series(splitclusterdf['mostcentralterm'].values, index=splitclusterdf['argtext']).to_dict()
         log(f"Created arg2rollup mapping for {len(arg2rollup)} terms")
 
+        # === Verb Clustering ===
+        unique_verbs = df['verb'].dropna().unique()
+        log(f"{len(unique_verbs)} unique verbs")
+        verb_batches = [unique_verbs[i:i + batch_size] for i in range(0, len(unique_verbs), batch_size)]
+        verb_results = [arg_embeddings.process_batch(batch, df, edf, columns=('verb',)) for batch in tqdm(verb_batches)]
+        averaged_verb_embeddings = {}
+        for batch_result in verb_results:
+            averaged_verb_embeddings.update(batch_result)
+        log(f"Averaged embeddings for {len(averaged_verb_embeddings)} verbs")
+
+        verb_names = list(averaged_verb_embeddings.keys())
+        verb_embeddings_matrix = np.array(list(averaged_verb_embeddings.values()), dtype=np.float16)
+        save_pickle(verb_embeddings_matrix, verb_embed_mat_path)
+        cosine_matrix.embeddingsmatrix2cosinesimmat(verb_embeddings_matrix, memmap_file=verb_mm_path)
+        verb_mm = np.memmap(verb_mm_path, dtype='float16', shape=(len(verb_names), len(verb_names)), mode='r+')
+        log("Verb cosine similarity matrix created")
+
+        verb_clusters_named = agglomerative.agglomerative_clustering(
+            verb_embeddings_matrix, verb_names, mmfile=verb_mm_path,
+            threshold=term_internal_cluster_min_thresh, maxclusterprop=term_max_prop)
+        log(f"{len(verb_clusters_named)} verb clusters")
+
+        verb_names2mminddict = pd.DataFrame({"names": verb_names}).reset_index().set_index('names')['index'].to_dict()
+        verb_cluster_central = community.get_most_central_terms(verb_clusters_named, verb_names2mminddict, verb_mm)
+
+        verb_data = [(key, text) for key, texts in verb_clusters_named.items() for text in texts]
+        verb_splitdf = pd.DataFrame(verb_data, columns=['key', 'verb'])
+        verb_splitdf = pd.merge(verb_splitdf, verb_cluster_central, how="left", on="key")
+        verb2rollup = pd.Series(verb_splitdf['mostcentralterm'].values, index=verb_splitdf['verb']).to_dict()
+        log(f"Created verb2rollup mapping for {len(verb2rollup)} verbs")
+
         # === Sentence Roll-up ===
         dfsmall = df[["post_id", "sentence", "description", "arg0", "verb", "arg1", "argM-NEG"]].fillna("")
         dfsmall["arg0cluster"] = dfsmall["arg0"].apply(lambda x: arg2rollup.get(x, x))
         dfsmall["arg1cluster"] = dfsmall["arg1"].apply(lambda x: arg2rollup.get(x, x))
-        dfsmallnew = dfsmall[["arg0cluster", "verb", "arg1cluster", "argM-NEG", "post_id", "sentence"]]
+        dfsmall["verbcluster"] = dfsmall["verb"].apply(lambda x: verb2rollup.get(x, x))
+        dfsmallnew = dfsmall[["arg0cluster", "verbcluster", "arg1cluster", "argM-NEG", "post_id", "sentence"]]
 
         # === Relation Grouping ===
         edf['avg_embedding'] = edf.apply(lambda row: np.mean(np.vstack(row.dropna()), axis=0) if len(row.dropna()) > 0 else np.nan, axis=1)
@@ -121,7 +155,7 @@ def run_pipeline(input_df, working_dir=None, temp_dir=None, verbose=False, save_
         #np.where(edf.avg_embedding.apply(lambda x: isinstance(x, np.ndarray)) != True)
         #np.where(df_with_embeddings.avg_embedding.apply(lambda x: isinstance(x, np.ndarray)) != True)
 
-        grouped_data = df_with_embeddings.groupby(['arg0cluster', 'verb', 'arg1cluster', "argM-NEG"])
+        grouped_data = df_with_embeddings.groupby(['arg0cluster', 'verbcluster', 'arg1cluster', "argM-NEG"])
         group_embeds = grouped_data['avg_embedding'].apply(lambda x: (np.mean(np.vstack([e for e in x if isinstance(e, np.ndarray)]), axis=0), len(x)))
         group_embeds = group_embeds.apply(pd.Series)
         group_embeds.columns = ['avg_embedding', 'count']
@@ -134,7 +168,7 @@ def run_pipeline(input_df, working_dir=None, temp_dir=None, verbose=False, save_
         # === Final Clustering of Relations ===
         groupdropna = grouped_embeddings.dropna().reset_index(drop=True)
         relembedsmat = np.vstack(groupdropna["avg_embedding"])
-        relnames = groupdropna[["arg0cluster", "verb", "arg1cluster", "argM-NEG"]].apply(lambda row: " / ".join([str(t) for t in row]), axis=1)
+        relnames = groupdropna[["arg0cluster", "verbcluster", "arg1cluster", "argM-NEG"]].apply(lambda row: " / ".join([str(t) for t in row]), axis=1)
 
         cosine_matrix.embeddingsmatrix2cosinesimmat(relembedsmat, memmap_file=rels_mmfile_path)
         relmm = np.memmap(rels_mmfile_path, dtype='float16', shape=(len(relnames), len(relnames)), mode='r+')
@@ -156,8 +190,8 @@ def run_pipeline(input_df, working_dir=None, temp_dir=None, verbose=False, save_
         relsplitdf = relsplitdf.sort_values(by='frequency', ascending=False)
 
         # Final aggregation
-        termroll = groupdropna[["arg0cluster", "verb", "arg1cluster", "argM-NEG", "count"]]
-        termrollnamesjoined = termroll[["arg0cluster", "verb", "arg1cluster", "argM-NEG"]].apply(lambda row: " / ".join([str(t) for t in row]), axis=1)
+        termroll = groupdropna[["arg0cluster", "verbcluster", "arg1cluster", "argM-NEG", "count"]]
+        termrollnamesjoined = termroll[["arg0cluster", "verbcluster", "arg1cluster", "argM-NEG"]].apply(lambda row: " / ".join([str(t) for t in row]), axis=1)
         trdf = pd.DataFrame({"argtext": termrollnamesjoined, "count": termroll["count"]})
         trdfmerge = pd.merge(trdf, relsplitdf, how="left", on="argtext")
         trdfmerge["combcol"] = trdfmerge.apply(lambda row: row["mostcentralterm"] if not pd.isna(row["mostcentralterm"]) else row["argtext"], axis=1)
