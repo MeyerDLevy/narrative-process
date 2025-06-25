@@ -12,7 +12,36 @@ from narrative_process.srl.srl_spacy_parallel import process_texts_parallel
 
 
 
-def run_pipeline(input_df, working_dir=None, temp_dir=None, verbose=False, save_output=None, unique_sents=False):
+def run_pipeline(
+    input_df,
+    working_dir=None,
+    temp_dir=None,
+    verbose=False,
+    save_output=None,
+    unique_sents=False,
+    return_locals=False,
+):
+    """Run the full narrative processing pipeline.
+
+    Parameters
+    ----------
+    input_df : pandas.DataFrame
+        DataFrame containing a column named ``text`` with sentences to process.
+    working_dir : str, optional
+        Directory to store intermediate artifacts.
+    temp_dir : str, optional
+        Base directory for temporary working directory when ``working_dir`` is
+        not provided.
+    verbose : bool, default False
+        Enable verbose logging.
+    save_output : str, optional
+        Path to save the final CSV output.
+    unique_sents : bool, default False
+        If True, deduplicate sentences before processing.
+    return_locals : bool, default False
+        If True, return a copy of the function's local variables under the key
+        ``"locals"`` in the result dictionary.
+    """
     if working_dir is None:
         temp_dir_path = tempfile.TemporaryDirectory(dir=temp_dir)
         working_dir = temp_dir_path.name
@@ -237,14 +266,22 @@ def run_pipeline(input_df, working_dir=None, temp_dir=None, verbose=False, save_
         del mm
         del relmm
 
-        return {
+        result = {
             "rels": rels,
             "term_clusters": clusters_named,
             "term_centroids": cluster_central,
             "relation_clusters": relclusters_named,
             "relation_centroids": relcluster_central,
-            "rollup": rollupprint
+            "rollup": rollupprint,
         }
+
+        if return_locals:
+            # capture locals after cleanup; avoid including the result dictionary itself
+            debug_locals = locals().copy()
+            debug_locals.pop("result", None)
+            result["locals"] = debug_locals
+
+        return result
 
     finally:
         pass
