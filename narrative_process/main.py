@@ -20,6 +20,7 @@ def run_pipeline(
     save_output=None,
     unique_sents=False,
     return_locals=False,
+    reuse_embeddings=True,
 ):
     """Run the full narrative processing pipeline.
 
@@ -41,6 +42,9 @@ def run_pipeline(
     return_locals : bool, default False
         If True, return a copy of the function's local variables under the key
         ``"locals"`` in the result dictionary.
+    reuse_embeddings : bool, default True
+        If True and previously generated embeddings exist at ``embeds.pickle``
+        inside ``working_dir``, reuse them instead of recomputing.
     """
     if working_dir is None:
         temp_dir_path = tempfile.TemporaryDirectory(dir=temp_dir)
@@ -91,10 +95,15 @@ def run_pipeline(
         log(f"{len(df)} sentences with non-empty arg0/arg1")
 
         # === Argument Embeddings ===
-        edicts = arg_embeddings.generate_embeddings(df, bert)
-        edf = pd.DataFrame(edicts)
-        save_pickle(edicts, embeddings_path)
-        log(f"Generated embeddings for {len(edf)} records")
+        if reuse_embeddings and os.path.exists(embeddings_path):
+            log(f"Loading embeddings from {embeddings_path}")
+            edicts = load_pickle(embeddings_path)
+            edf = pd.DataFrame(edicts)
+        else:
+            edicts = arg_embeddings.generate_embeddings(df, bert)
+            edf = pd.DataFrame(edicts)
+            save_pickle(edicts, embeddings_path)
+            log(f"Generated embeddings for {len(edf)} records")
 
         # === Averaged Argument Embeddings ===
         concatenated_args = df[['arg0', 'arg1']].values.ravel('K')
