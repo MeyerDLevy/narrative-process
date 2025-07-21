@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import tempfile
 from tqdm import tqdm
-from narrative_process.utils.io import save_pickle, load_pickle, log_message
+from narrative_process.utils.io import save_pickle, load_pickle, log_message, iter_pickles
 from narrative_process.embeddings import bert, arg_embeddings
 from narrative_process.clustering import cosine_matrix, agglomerative, community
 from narrative_process.srl.srl_spacy_parallel import process_texts_parallel
@@ -91,10 +91,10 @@ def run_pipeline(
         log(f"{len(df)} sentences with non-empty arg0/arg1")
 
         # === Argument Embeddings ===
-        edicts = arg_embeddings.generate_embeddings(df, bert)
+        summary = arg_embeddings.generate_embeddings(df, bert, output=embeddings_path)
+        edicts = list(iter_pickles(embeddings_path))
         edf = pd.DataFrame(edicts)
-        save_pickle(edicts, embeddings_path)
-        log(f"Generated embeddings for {len(edf)} records")
+        log(f"Generated embeddings for {summary['count']}")
 
         # === Averaged Argument Embeddings ===
         concatenated_args = df[['arg0', 'arg1']].values.ravel('K')
