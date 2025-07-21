@@ -25,25 +25,30 @@ def embeddingsmatrix2cosinesimmat(matrix, distancemetric='cosine', batch_size=10
         covariance_matrix = np.cov(matrix, rowvar=False)
         inv_cov_matrix = inv(covariance_matrix)
 
-    for i in tqdm(range(0, n, batch_size), desc='Processing batches'):
-        end = min(i + batch_size, n)
-        batch = matrix[i:end]
+    for i in tqdm(range(0, n, batch_size), desc='Processing rows'):
+        end_i = min(i + batch_size, n)
+        batch_i = matrix[i:end_i]
+        for j in range(i, n, batch_size):
+            end_j = min(j + batch_size, n)
+            batch_j = matrix[j:end_j]
 
-        if distancemetric == 'cosine':
-            batch_distance = cosine_similarity(batch, matrix)
-        elif distancemetric == 'euclidean':
-            batch_distance = euclidean_distances(batch, matrix)
-        elif distancemetric == 'manhattan':
-            batch_distance = manhattan_distances(batch, matrix)
-        elif distancemetric == 'mahalanobis':
-            batch_distance = np.array([
-                [np.sqrt((p - q).dot(inv_cov_matrix).dot((p - q).T)) for q in matrix]
-                for p in batch
-            ])
-        else:
-            raise ValueError("Unsupported distance metric.")
+            if distancemetric == 'cosine':
+                block = cosine_similarity(batch_i, batch_j)
+            elif distancemetric == 'euclidean':
+                block = euclidean_distances(batch_i, batch_j)
+            elif distancemetric == 'manhattan':
+                block = manhattan_distances(batch_i, batch_j)
+            elif distancemetric == 'mahalanobis':
+                block = np.array([
+                    [np.sqrt((p - q).dot(inv_cov_matrix).dot((p - q).T)) for q in batch_j]
+                    for p in batch_i
+                ])
+            else:
+                raise ValueError("Unsupported distance metric.")
 
-        distance_matrix[i:end, :] = batch_distance.astype(dtype)
+            distance_matrix[i:end_i, j:end_j] = block.astype(dtype)
+            if j != i:
+                distance_matrix[j:end_j, i:end_i] = block.T.astype(dtype)
 
     del distance_matrix  # Close and flush to disk
     print(f"[{datetime.datetime.now()}] Cosine matrix saved to {memmap_file}")

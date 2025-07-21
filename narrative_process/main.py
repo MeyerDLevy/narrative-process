@@ -60,9 +60,9 @@ def run_pipeline(
         results_path = os.path.join(working_dir, "results.pickle")
         names_path = os.path.join(working_dir, "names.pickle")
         mm_path = os.path.join(working_dir, "cosine_similarity.mmap")
-        term_embed_mat_path = os.path.join(working_dir, "term_embeds_mat.pickle")
+        term_embed_mat_path = os.path.join(working_dir, "term_embeds_mat.mmap")
         verb_mm_path = os.path.join(working_dir, "verb_cosine_similarity.mmap")
-        verb_embed_mat_path = os.path.join(working_dir, "verb_embeds_mat.pickle")
+        verb_embed_mat_path = os.path.join(working_dir, "verb_embeds_mat.mmap")
         verb_splitdf_path = os.path.join(working_dir, "verb_splitdf.pickle")
         grouped_data_path = os.path.join(working_dir, "grouped_data.pickle")
         rels_mmfile_path = os.path.join(working_dir, "rels_cosine_similarity.mmap")
@@ -103,18 +103,32 @@ def run_pipeline(
 
         batch_size = 2500
         batches = [unique_values[i:i + batch_size] for i in range(0, len(unique_values), batch_size)]
-        results = [arg_embeddings.process_batch(batch, df, edf) for batch in tqdm(batches)]
-        averaged_embeddings = {}
-        for batch_result in results:
-            averaged_embeddings.update(batch_result)
-        log(f"Averaged embeddings for {len(averaged_embeddings)} terms")
+        names = []
+        results = []
+        embeddings_matrix = None
+        embed_dim = None
+        row_idx = 0
+        for batch in tqdm(batches):
+            batch_result = arg_embeddings.process_batch(batch, df, edf)
+            results.append(batch_result)
+            if embeddings_matrix is None and batch_result:
+                embed_dim = len(next(iter(batch_result.values())))
+                embeddings_matrix = np.memmap(term_embed_mat_path, dtype=np.float16, mode='w+', shape=(len(unique_values), embed_dim))
+            for name, emb in batch_result.items():
+                if embeddings_matrix is None:
+                    embed_dim = len(emb)
+                    embeddings_matrix = np.memmap(term_embed_mat_path, dtype=np.float16, mode='w+', shape=(len(unique_values), embed_dim))
+                embeddings_matrix[row_idx] = emb.astype(np.float16)
+                names.append(name)
+                row_idx += 1
+        if embeddings_matrix is None:
+            embeddings_matrix = np.memmap(term_embed_mat_path, dtype=np.float16, mode='w+', shape=(0, 0))
+        embeddings_matrix.flush()
+        embeddings_matrix = embeddings_matrix[:row_idx]
+        log(f"Averaged embeddings for {len(names)} terms")
 
         save_pickle(results, results_path)
-        names = list(averaged_embeddings.keys())
         save_pickle(names, names_path)
-
-        embeddings_matrix = np.array(list(averaged_embeddings.values()), dtype=np.float16)
-        save_pickle(embeddings_matrix, term_embed_mat_path)
         log(f"Embedding matrix shape: {embeddings_matrix.shape}")
 
         # === Cosine Similarity ===
@@ -142,15 +156,28 @@ def run_pipeline(
         unique_verbs = df['verb'].dropna().unique()
         log(f"{len(unique_verbs)} unique verbs")
         verb_batches = [unique_verbs[i:i + batch_size] for i in range(0, len(unique_verbs), batch_size)]
-        verb_results = [arg_embeddings.process_batch(batch, df, edf, columns=('verb',)) for batch in tqdm(verb_batches)]
-        averaged_verb_embeddings = {}
-        for batch_result in verb_results:
-            averaged_verb_embeddings.update(batch_result)
-        log(f"Averaged embeddings for {len(averaged_verb_embeddings)} verbs")
+        verb_names = []
+        verb_embeddings_matrix = None
+        verb_embed_dim = None
+        verb_row_idx = 0
+        for batch in tqdm(verb_batches):
+            batch_result = arg_embeddings.process_batch(batch, df, edf, columns=('verb',))
+            if verb_embeddings_matrix is None and batch_result:
+                verb_embed_dim = len(next(iter(batch_result.values())))
+                verb_embeddings_matrix = np.memmap(verb_embed_mat_path, dtype=np.float16, mode='w+', shape=(len(unique_verbs), verb_embed_dim))
+            for name, emb in batch_result.items():
+                if verb_embeddings_matrix is None:
+                    verb_embed_dim = len(emb)
+                    verb_embeddings_matrix = np.memmap(verb_embed_mat_path, dtype=np.float16, mode='w+', shape=(len(unique_verbs), verb_embed_dim))
+                verb_embeddings_matrix[verb_row_idx] = emb.astype(np.float16)
+                verb_names.append(name)
+                verb_row_idx += 1
+        if verb_embeddings_matrix is None:
+            verb_embeddings_matrix = np.memmap(verb_embed_mat_path, dtype=np.float16, mode='w+', shape=(0, 0))
+        verb_embeddings_matrix.flush()
+        verb_embeddings_matrix = verb_embeddings_matrix[:verb_row_idx]
+        log(f"Averaged embeddings for {len(verb_names)} verbs")
 
-        verb_names = list(averaged_verb_embeddings.keys())
-        verb_embeddings_matrix = np.array(list(averaged_verb_embeddings.values()), dtype=np.float16)
-        save_pickle(verb_embeddings_matrix, verb_embed_mat_path)
         cosine_matrix.embeddingsmatrix2cosinesimmat(verb_embeddings_matrix, memmap_file=verb_mm_path)
         verb_mm = np.memmap(verb_mm_path, dtype='float16', shape=(len(verb_names), len(verb_names)), mode='r+')
         log("Verb cosine similarity matrix created")
