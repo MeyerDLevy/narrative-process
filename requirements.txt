@@ -1,1 +1,10 @@
-# Required Python packages
+pandas
+numpy
+tqdm
+scikit-learn
+networkx
+python-louvain
+spacy
+joblib
+torch
+transformers
