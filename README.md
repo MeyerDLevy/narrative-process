@@ -16,18 +16,8 @@ This repository contains a Python pipeline for extracting and clustering narrati
    pip install -r requirements.txt
    ```
 2. Prepare a CSV file with a column named `text` containing sentences.
-3. Run the pipeline:
+3. Run the pipeline on the included example CSV:
    ```bash
-   python scripts/run_pipeline_example.py
+   python scripts/import_csv_example.py
    ```
-   This script reads an example CSV and processes it through the pipeline.
-
-## Simple CSV import example
-
-A minimal example that simply loads a CSV and prints its first rows is provided:
-
-```bash
-python scripts/import_csv_example.py
-```
-
-This demonstrates how to load a CSV using pandas and is a starting point for integrating your own data.
+   This script loads a sample dataset and processes it through the narrative pipeline, printing the first few relation rows.
